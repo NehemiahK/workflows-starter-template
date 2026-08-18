@@ -1,3 +1,11 @@
+// Re-exported only because Cloudflare's deploy check requires any class a previous
+// version's Durable Object migration created to keep being exported (error 10064) —
+// the versioned/gradual-deployments flow this repo's GitHub integration uses can't
+// process a migration at all (error 10211), so neither adding nor removing one works.
+// Both classes are otherwise unused by the fetch handler below.
+export { MyWorkflow } from "./workflow";
+export { WorkflowStatusDO } from "./durable-object";
+
 /**
  * Minimal request-logging Worker for testing Web Bot Auth signature headers.
  *
@@ -50,4 +58,4 @@ export default {
 			headers: { "Content-Type": "text/html" },
 		});
 	},
-} satisfies ExportedHandler;
+} satisfies ExportedHandler<Env>;
