@@ -9,7 +9,12 @@
 	"compatibility_date": "2025-10-08",
 	"assets": {
 		"directory": "./dist",
-		"not_found_handling": "single-page-application"
+		"not_found_handling": "single-page-application",
+		// Without this, "/" matches the React app's index.html as a static asset and
+		// Cloudflare serves it directly, never invoking the Worker below — which is why
+		// a scan's main-page request never reached the request logger (it audited the
+		// original demo SPA instead). This routes every request to the Worker first.
+		"run_worker_first": true
 	},
 	"observability": {
 		"enabled": true

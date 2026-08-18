@@ -1,125 +1,67 @@
-// Export the Workflow and Durable Object classes
+// Re-exported only because Cloudflare's deploy check requires any class a previous
+// version's Durable Object migration created to keep being exported (error 10064) —
+// the versioned/gradual-deployments flow this repo's GitHub integration uses can't
+// process a migration at all (error 10211), so neither adding nor removing one works.
+// MyWorkflow is otherwise unused; WorkflowStatusDO is repurposed as the log store below.
 export { MyWorkflow } from "./workflow";
 export { WorkflowStatusDO } from "./durable-object";
 
 /**
- * Main Worker fetch handler
+ * Minimal request-logging Worker for testing Web Bot Auth signature headers.
  *
- * Handles API routes and WebSocket upgrade requests for workflow management:
- * - POST /api/workflow/start - Create new workflow instance
- * - GET /api/workflow/status/:id - Get workflow status
- * - POST /api/workflow/event/:id - Send events to workflow
- * - GET /ws - WebSocket connection for real-time updates
+ * Logs every incoming request (method, url, headers) via a single Durable Object
+ * instance — not in-memory, since isolate memory is per-edge-location and a
+ * scanner's requests won't land on the same isolate as a manual check — and
+ * exposes the captured log as JSON at /__logs. Serves a plain test page for a
+ * scanner to crawl/audit at every other path.
  */
+
+const PAGE_HTML = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Web Bot Auth signing test page</title></head>
+<body>
+  <h1>Web Bot Auth signing test page</h1>
+  <p>This page exists only to capture headers from an accessFlow scan for signature verification.</p>
+  <a href="/other">A second page</a>
+</body>
+</html>`;
+
+function getLogStore(env: Env) {
+	const id = env.WORKFLOW_STATUS.idFromName("request-log");
+	return env.WORKFLOW_STATUS.get(id);
+}
+
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
 		const url = new URL(request.url);
+		const store = getLogStore(env);
 
-		// API: Start a new workflow instance
-		if (url.pathname === "/api/workflow/start" && request.method === "POST") {
-			try {
-				const instance = await env.MY_WORKFLOW.create({
-					params: {
-						timestamp: Date.now(),
-					},
-				});
-
-				return Response.json({
-					instanceId: instance.id,
-					message: "Workflow started successfully",
-				});
-			} catch {
-				return Response.json(
-					{ error: "Failed to start workflow" },
-					{ status: 500 },
-				);
-			}
+		if (url.pathname === "/__logs") {
+			const logs = await store.getLogs();
+			return new Response(JSON.stringify(logs, null, 2), {
+				headers: { "Content-Type": "application/json" },
+			});
 		}
 
-		// API: Get workflow status
-		if (url.pathname.startsWith("/api/workflow/status/")) {
-			const instanceId = url.pathname.split("/").pop();
-			if (!instanceId) {
-				return Response.json(
-					{ error: "Instance ID required" },
-					{ status: 400 },
-				);
-			}
+		const headers: Record<string, string> = {};
+		for (const [key, value] of request.headers.entries()) {
+			headers[key] = value;
+		}
+		await store.logRequest({
+			timestamp: new Date().toISOString(),
+			method: request.method,
+			url: url.pathname + url.search,
+			headers,
+		});
 
-			try {
-				const instance = await env.MY_WORKFLOW.get(instanceId);
-				const status = await instance.status();
-				return Response.json(status);
-			} catch {
-				return Response.json(
-					{ error: "Failed to get workflow status" },
-					{ status: 500 },
-				);
-			}
+		if (url.pathname === "/robots.txt") {
+			return new Response("User-agent: *\nAllow: /\n", {
+				headers: { "Content-Type": "text/plain" },
+			});
 		}
 
-		// API: Send event to workflow instance
-		if (
-			url.pathname.startsWith("/api/workflow/event/") &&
-			request.method === "POST"
-		) {
-			const instanceId = url.pathname.split("/").pop();
-			if (!instanceId) {
-				return Response.json(
-					{ error: "Instance ID required" },
-					{ status: 400 },
-				);
-			}
-
-			try {
-				const body = (await request.json()) as {
-					approved: boolean;
-					comment?: string;
-				};
-				const instance = await env.MY_WORKFLOW.get(instanceId);
-
-				await instance.sendEvent({
-					type: "user-approval",
-					payload: body,
-				});
-
-				return Response.json({
-					success: true,
-					message: "Event sent successfully",
-				});
-			} catch {
-				return Response.json(
-					{ error: "Failed to send event" },
-					{ status: 500 },
-				);
-			}
-		}
-
-		// WebSocket: Connect to workflow status updates
-		if (url.pathname === "/ws") {
-			const instanceId = url.searchParams.get("instanceId");
-			if (!instanceId) {
-				return new Response("instanceId query parameter required", {
-					status: 400,
-				});
-			}
-
-			const upgradeHeader = request.headers.get("Upgrade");
-			if (upgradeHeader !== "websocket") {
-				return new Response("Expected Upgrade: websocket", { status: 426 });
-			}
-
-			try {
-				const doId = env.WORKFLOW_STATUS.idFromName(instanceId);
-				const stub = env.WORKFLOW_STATUS.get(doId);
-				return stub.fetch(request);
-			} catch {
-				return new Response("Failed to establish WebSocket connection", {
-					status: 500,
-				});
-			}
-		}
-
-		return Response.json({ error: "Not Found" }, { status: 404 });
+		return new Response(PAGE_HTML, {
+			headers: { "Content-Type": "text/html" },
+		});
 	},
 } satisfies ExportedHandler<Env>;
