@@ -9,17 +9,11 @@
 	"compatibility_date": "2025-10-08",
 	"observability": {
 		"enabled": true
-	},
-	/**
-	 * The original template deployed a WorkflowStatusDO Durable Object (migration
-	 * tag v1). Cloudflare requires an explicit deleted_classes migration to retire
-	 * a previously-deployed Durable Object class — simply removing its binding
-	 * config isn't enough and gets rejected on deploy.
-	 */
-	"migrations": [
-		{
-			"tag": "v2",
-			"deleted_classes": ["WorkflowStatusDO"]
-		}
-	]
+	}
+	// No `migrations` key: this repo's Cloudflare GitHub integration deploys via the
+	// versioned/gradual-deployments API, which rejects ANY Durable Object migration
+	// entry outright (error 10211) — including a deleted_classes one. The original
+	// WorkflowStatusDO namespace is just left orphaned/unused rather than formally
+	// retired; that requires a plain (non-versioned) `wrangler deploy` run manually,
+	// which this automatic pipeline doesn't do.
 }
